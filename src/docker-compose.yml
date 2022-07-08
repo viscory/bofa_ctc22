@@ -1,0 +1,15 @@
+version: "1.0"
+services:
+  main:
+    #alpine
+    image: alpine:latest
+    environment:
+      - TEST
+    volumes:
+      - ./code:/var/app
+    env_file:
+      - .env
+    restart: always
+    working_dir: /var/app
+    command:
+    entrypoint: 
