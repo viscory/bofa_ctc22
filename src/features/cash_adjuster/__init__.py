@@ -5,44 +5,12 @@ from logging.config import dictConfig
 from flask import Flask, request, jsonify, g
 from flask_restful import Api, Resource
 
-dictConfig({
-    'version': 1,
-    'formatters': {
-        'default': {
-            'format': '[%(asctime)s] %(levelname)s in %(module)s: %(message)s',
-        }
-    },
-    'handlers': {
-        'wsgi': {
-            'class': 'logging.StreamHandler',
-            'stream': 'ext://flask.logging.wsgi_errors_stream',
-            'formatter': 'default'
-        },
-        'standard': {
-            'level': 'INFO',
-            'formatter': 'default',
-            'class': 'logging.StreamHandler',
-            'stream': 'ext://sys.stdout',  # Default is stderr
-        },
-    },
-    'root': {
-        'level': 'INFO',
-        'handlers': ['wsgi', 'standard']
-    }
-})
+from features.common import FiccCommon
 
-
-class CashAdjusterCommon:
+class CashAdjusterCommon(FiccCommon):
     def __init__(self):
-        self.DATABASE = 'data/cash_adjuster.db'
+        super().__init__('data/cash_adjuster.db', 'cashAdjuster')
         self.INITIAL_FX_DATA = 'data/initial_cash.csv'
-
-    @staticmethod
-    def close_connection():
-        db = getattr(g, '_database', None)
-        if db is not None:
-            db.commit()
-            db.close()
 
     def init_desk_table(self, cursor):
         cursor.execute('''
@@ -60,29 +28,8 @@ class CashAdjusterCommon:
                     VALUES ("{desk}", {cash})
                 ''')
 
-
     def init_data(self, cursor):
         self.init_desk_table(cursor)
-
-    def init_db(self):
-        try:
-            os.stat(self.DATABASE)
-        except FileNotFoundError:
-            try:
-                conn = sqlite3.connect(self.DATABASE)
-                cursor = conn.cursor()
-                self.init_data(cursor)
-                conn.commit()
-                conn.close()
-            except Exception:
-                app.logger.error("Error initializing database")
-
-    def get_db(self):
-        self.init_db()
-        db = getattr(g, '_database', None)
-        if db is None:
-            db = g._database = sqlite3.connect(self.DATABASE)
-        return db
 
     def get_cash(self, cursor, desk):
         result = (cursor.execute(f'''
@@ -106,7 +53,7 @@ class CashAdjusterCommon:
         ''')
 
 
-class PurchaseManager(Resource, CashAdjusterCommon):
+class BuyManager(Resource, CashAdjusterCommon):
     def __init__(self):
         super().__init__()
 
@@ -114,13 +61,15 @@ class PurchaseManager(Resource, CashAdjusterCommon):
         return self.get_cash(cursor, desk) >= value
 
     def post(self):
-        req = res = request.json
+        payload = dict()
+        req = request.json
         desk, txnValue = req['Desk'], float(req['TxnValue'])
         cursor = self.get_db().cursor()
         if self.is_valid(cursor, desk, txnValue):
             self.adjust_cash(cursor, desk, -1*txnValue)
+            
             request.post(
-                url=f"localhost:{os.getenv('PORTFOLIO_ENGINE_PORT')}/buy_adjustment",
+                url=f"{os.getenv('FLASK_HOST')}:{os.getenv('PORTFOLIO_ENGINE_PORT')}/buy_adjustment",
                 data=req,
             )
         else:
@@ -132,7 +81,7 @@ class PurchaseManager(Resource, CashAdjusterCommon):
         return jsonify(res), 200
 
 
-class SellManager(Resource, CashAdjusterCommon):
+class SellAdjuster(Resource, CashAdjusterCommon):
     def __init__(self):
         super().__init__()
 
@@ -142,7 +91,9 @@ class SellManager(Resource, CashAdjusterCommon):
         cursor = self.get_db().cursor()
         self.adjust_cash(cursor, desk, txnValue)
         self.close_connection()
-        return jsonify({}), 200
+        return jsonify({
+            'msg': 'success'
+        }), 200
 
 
 class DeskDataPublisher(Resource, CashAdjusterCommon):
