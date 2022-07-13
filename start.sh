@@ -1,14 +1,14 @@
 if [ ! -f "pidfile" ]
 then
-	python3 "`pwd`/src/event_generator.py" &
+	python3 "`pwd`/backend/event_generator.py" &
 	echo $! >> "pidfile"
-	python3 "`pwd`/src/market_data_producer.py" &
+	python3 "`pwd`/backend/market_data_producer.py" &
 	echo $! >> "pidfile"
-	python3 "`pwd`/src/trade_data_producer.py" &
+	python3 "`pwd`/backend/trade_data_producer.py" &
 	echo $! >> "pidfile"
-	python3 "`pwd`/src/cash_adjuster.py" &
+	python3 "`pwd`/backend/cash_adjuster.py" &
 	echo $! >> "pidfile"
-	python3 "`pwd`/src/portfolio_engine.py" &
+	python3 "`pwd`/backend/portfolio_engine.py" &
 	echo $! >> "pidfile"
 else
 	while true; do

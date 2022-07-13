@@ -1,1 +1,1 @@
-rm -f src/data/*db
+rm `find backend | grep \.db$` -f

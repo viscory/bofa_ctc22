@@ -1,48 +1,20 @@
 import json
 import os
 import time
-import sqlite3
 import requests
 from flask import Flask, g, jsonify
 from flask_restful import Api, Resource
 
-EVENT_DELAY = int(os.getenv('EVENT_PRODUCTION_DELAY'))/1000
-EVENTS_DIR = f"{os.getcwd()}/{os.getenv('EVENTS_DIR')}"
+from common import DbCommon
 
 MARKET_DATA_EVENTS = ["FXEvent", "PriceEvent"]
 TRADE_EVENTS = ["TradeEvent"]
 ALLOWED_EVENTS = TRADE_EVENTS + MARKET_DATA_EVENTS
 
-class EventGeneratorCommon:
+
+class EventGeneratorDbCommon(DbCommon):
     def __init__(self):
-        self.DATABASE = 'data/exclusions.db'
-
-    def close_connection(self):
-        db = getattr(g, "_database", None)
-        if db is not None:
-            g._database = None
-            db.commit()
-            db.close()
-
-    def get_db(self):
-        self.init_db()
-        db = getattr(g, "_database", None)
-        if db is None:
-            db = g._database = sqlite3.connect(self.DATABASE)
-        return db
-
-    def init_db(self):
-        try:
-            os.stat(self.DATABASE)
-        except FileNotFoundError:
-            try:
-                conn = sqlite3.connect(self.DATABASE)
-                cursor = conn.cursor()
-                self.init_data(cursor)
-                conn.commit()
-                conn.close()
-            except Exception:
-                print("Error initializing database")
+        super().__init__('backend/data/exclusions.db', g)
 
     def init_data(self, cursor):
         self.init_exclusion_table(cursor)
@@ -63,10 +35,9 @@ class EventGeneratorCommon:
         ''')
 
 
-class EventGenerator(Resource, EventGeneratorCommon):
+class EventGenerator(Resource, EventGeneratorDbCommon):
     def __init__(self):
         super().__init__()
-        self.DATABASE = 'data/exclusions.db'
 
     def insert_exclusion(
         self,
@@ -100,7 +71,7 @@ class EventGenerator(Resource, EventGeneratorCommon):
         ''')
 
     def get(self):
-        with open(EVENTS_DIR, 'r') as dataFile:
+        with open(os.getenv('EVENTS_DIR'), 'r') as dataFile:
             events = json.loads(dataFile.read())
             for event in events:
                 eventType, eventID = event['EventType'], event['EventID']
@@ -141,13 +112,13 @@ class EventGenerator(Resource, EventGeneratorCommon):
                         self.close_connection()
                 else:
                     app.logger.error(f"EventID: {event.get('EventID')}, invalid event type")
-                time.sleep(EVENT_DELAY)
+                time.sleep(int(os.getenv('EVENT_PRODUCTION_DELAY'))/1000)
         self.close_connection()
 
         return jsonify({'msg': 'success'}), 200
 
 
-class ExclusionPublisher(Resource, EventGeneratorCommon):
+class ExclusionPublisher(Resource, EventGeneratorDbCommon):
     def __init__(self):
         super().__init__()
 

@@ -1,42 +1,14 @@
 import os
 import csv
-import sqlite3
 from flask import Flask, request, jsonify, g
 from flask_restful import Resource, Api
 
+from common import DbCommon
 
-class MarketDataCommon:
+
+class MarketDataDbCommon(DbCommon):
     def __init__(self):
-        self.DATABASE = 'data/market_prices.db'
-        self.INITIAL_FX_DATA = 'data/initial_fx.csv'
-        self.INITIAL_BOND_DATA = 'data/bond_details.csv'
-
-    def get_db(self):
-        self.init_db()
-        db = getattr(g, "_database", None)
-        if db is None:
-            db = g._database = sqlite3.connect(self.DATABASE)
-        return db
-
-    def close_connection(self):
-        db = getattr(g, "_database", None)
-        if db is not None:
-            g._database = None
-            db.commit()
-            db.close()
-
-    def init_db(self):
-        try:
-            os.stat(self.DATABASE)
-        except FileNotFoundError:
-            try:
-                conn = sqlite3.connect(self.DATABASE)
-                cursor = conn.cursor()
-                self.init_data(cursor)
-                conn.commit()
-                conn.close()
-            except Exception:
-                print("Error initializing database")
+        super().__init__('backend/data/market_prices.db', g)
 
     def init_data(self, cursor):
         self.init_bond_table(cursor)
@@ -50,7 +22,7 @@ class MarketDataCommon:
                 Price REAL
             )
         ''')
-        with open(self.INITIAL_BOND_DATA, 'r') as handle:
+        with open(os.getenv('INITIAL_BOND_DATA'), 'r') as handle:
             reader = csv.reader(handle)
             next(reader)
             for (bondID, currency) in reader:
@@ -66,7 +38,7 @@ class MarketDataCommon:
                 Rate REAL
             )
         ''')
-        with open(self.INITIAL_FX_DATA, 'r') as handle:
+        with open(os.getenv('INITIAL_FX_DATA'), 'r') as handle:
             reader = csv.reader(handle)
             next(reader)
             for (currency, rate) in reader:
@@ -76,47 +48,42 @@ class MarketDataCommon:
                 ''')
 
 
-class MarketDataSubscriber(Resource, MarketDataCommon):
+class MarketDataSubscriber(Resource, MarketDataDbCommon):
     def __init__(self):
         super().__init__()
 
-    def update_bond(self, conn, bondID, price):
+    def update_bond(self, cursor, bondID, price):
         # trading restricted to 30 given bonds/ bond_details.csv
-        cursor = conn.cursor()
         cursor.execute(f'''
             UPDATE BondPrices
             SET Price = {price}
             WHERE BondID = "{bondID}"
         ''')
-        conn.commit()
 
-    def update_fx(self, conn, currency, rate):
+    def update_fx(self, cursor, currency, rate):
         # insert or replace as new currencies can be trades
-        cursor = conn.cursor()
-        sql = f'''
+        cursor.execute(f'''
             INSERT OR REPLACE INTO FxRates
             VALUES ('{currency}', {rate})
-        '''
-        cursor.execute(sql)
-        conn.commit()
+        ''')
 
     def post(self):
         req = request.json
         eventType = req.get('EventType')
-        conn = self.get_db()
+        cursor = self.get_db().cursor()
         if eventType == 'PriceEvent':
             bondID, price = req['BondID'], float(req['MarketPrice'])
-            self.update_bond(conn, bondID, price)
+            self.update_bond(cursor, bondID, price)
         if eventType == 'FXEvent':
             currency, rate = req['ccy'], float(req['rate'])
-            self.update_fx(conn, currency, rate)
+            self.update_fx(cursor, currency, rate)
         self.close_connection()
         response = jsonify({'msg': 'success'})
         response.status_code = 200
         return response
 
 
-class MarketDataPublisher(Resource, MarketDataCommon):
+class MarketDataPublisher(Resource, MarketDataDbCommon):
     def __init__(self):
         super().__init__()
 
@@ -146,16 +113,15 @@ class MarketDataPublisher(Resource, MarketDataCommon):
         return result
 
     def get(self):
-        conn = self.get_db()
-        cursor = conn.cursor()
+        cursor = self.get_db().cursor()
         result = self.get_market_prices(cursor)
-        conn.close()
+        self.close_connection()
         response = jsonify(result)
         response.status_code = 200
         return response
 
 
-class TradeDataEnricher(Resource, MarketDataCommon):
+class TradeDataEnricher(Resource, MarketDataDbCommon):
     def __init__(self):
         super().__init__()
 

@@ -4,36 +4,12 @@ import requests
 from flask import Flask, request, jsonify, g
 from flask_restful import Api, Resource
 
+from common import DbCommon
 
-class PortfolioEngineCommon():
+
+class PortfolioEngineDbCommon(DbCommon):
     def __init__(self):
-        self.DATABASE = 'data/portfolio_data.db'
-
-    def close_connection(self):
-        db = getattr(g, "_database", None)
-        if db is not None:
-            db.commit()
-            db.close()
-
-    def get_db(self):
-        self.init_db()
-        db = getattr(g, "_database", None)
-        if db is None:
-            db = g._database = sqlite3.connect(self.DATABASE)
-        return db
-
-    def init_db(self):
-        try:
-            os.stat(self.DATABASE)
-        except FileNotFoundError:
-            try:
-                conn = sqlite3.connect(self.DATABASE)
-                cursor = conn.cursor()
-                self.init_data(cursor)
-                conn.commit()
-                conn.close()
-            except Exception:
-                print("Error initializing database")
+        super().__init__('backend/data/portfolio_data.db', g)
 
     def init_data(self, cursor):
         self.init_portfolio_table(cursor)
@@ -75,7 +51,7 @@ class PortfolioEngineCommon():
         ''')
 
 
-class SellManager(Resource, PortfolioEngineCommon):
+class SellManager(Resource, PortfolioEngineDbCommon):
     def __init__(self):
         super().__init__()
 
@@ -117,7 +93,7 @@ class SellManager(Resource, PortfolioEngineCommon):
         return response
 
 
-class BuyAdjuster(Resource, PortfolioEngineCommon):
+class BuyAdjuster(Resource, PortfolioEngineDbCommon):
     def __init__(self):
         super().__init__()
 
@@ -139,7 +115,7 @@ class BuyAdjuster(Resource, PortfolioEngineCommon):
         return response
 
 
-class PortfolioDataPublisher(Resource, PortfolioEngineCommon):
+class PortfolioDataPublisher(Resource, PortfolioEngineDbCommon):
     def __init__(self):
         super().__init__()
 
@@ -152,10 +128,6 @@ class PortfolioDataPublisher(Resource, PortfolioEngineCommon):
     def get_market_prices(self):
         responseJson = requests.get(f"http://{os.getenv('FLASK_HOST')}:{os.getenv('MARKET_DATA_PRODUCER_PORT')}/get_market_data").json()
         return responseJson['Bond'], responseJson['FX']
-
-    @staticmethod
-    def calculate_net_value(quantity, marketPrice, fxRate):
-        return quantity * (marketPrice / fxRate)
 
     def get_info(self, cursor):
         res = []

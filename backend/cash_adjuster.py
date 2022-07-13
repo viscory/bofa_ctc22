@@ -1,41 +1,15 @@
 import os
 import csv
-import sqlite3
 import requests
 from flask import Flask, request, jsonify, g
 from flask_restful import Api, Resource
 
+from common import DbCommon
 
-class CashAdjusterCommon:
+
+class CashAdjusterDbCommon(DbCommon):
     def __init__(self):
-        self.DATABASE = 'data/cash_adjuster.db'
-        self.INITIAL_DESK_DATA = 'data/initial_cash.csv'
-
-    def close_connection(self):
-        db = getattr(g, "_database", None)
-        if db is not None:
-            db.commit()
-            db.close()
-
-    def get_db(self):
-        self.init_db()
-        db = getattr(g, "_database", None)
-        if db is None:
-            db = g._database = sqlite3.connect(self.DATABASE)
-        return db
-
-    def init_db(self):
-        try:
-            os.stat(self.DATABASE)
-        except FileNotFoundError:
-            try:
-                conn = sqlite3.connect(self.DATABASE)
-                cursor = conn.cursor()
-                self.init_data(cursor)
-                conn.commit()
-                conn.close()
-            except Exception:
-                print("Error initializing database")
+        super().__init__('backend/data/cash_adjuster.db', g)
 
     def init_data(self, cursor):
         self.init_desk_table(cursor)
@@ -47,15 +21,14 @@ class CashAdjusterCommon:
                 Cash REAL
             )
         ''')
-        with open(self.INITIAL_DESK_DATA, 'r') as handle:
+        with open(os.getenv('INITIAL_DESK_DATA'), 'r') as handle:
             reader = csv.reader(handle)
             next(reader)
             for (desk, cash) in reader:
-                sql=f'''
+                cursor.execute(f'''
                     INSERT INTO DeskLiquidity
                     VALUES ("{desk}", {float(cash)})
-                '''
-                cursor.execute(sql)
+                ''')
 
     def get_cash(self, cursor, desk):
         result = (cursor.execute(f'''
@@ -73,12 +46,8 @@ class CashAdjusterCommon:
             VALUES ("{desk}", {initial+value})
         ''')
 
-    @staticmethod
-    def calculate_net_value(quantity, marketPrice, fxRate):
-        return quantity * (marketPrice / fxRate)
 
-
-class BuyManager(Resource, CashAdjusterCommon):
+class BuyManager(Resource, CashAdjusterDbCommon):
     def __init__(self):
         super().__init__()
 
@@ -113,20 +82,21 @@ class BuyManager(Resource, CashAdjusterCommon):
                 json=payload
             )
             self.adjust_cash(cursor, desk, -1*txnValue)
-            self.close_connection()
         else:
+            self.close_connection()
             response = jsonify({
                 'ExclusionType': 'CASH_OVERLIMIT',
                 'MarketPrice': float(req['MarketPrice'])
             })
             response.status_code = 401
             return response
+        self.close_connection()
         response = jsonify({'msg': 'success'})
         response.status_code = 200
         return response
 
 
-class SellAdjuster(Resource, CashAdjusterCommon):
+class SellAdjuster(Resource, CashAdjusterDbCommon):
     def __init__(self):
         super().__init__()
 
@@ -149,7 +119,7 @@ class SellAdjuster(Resource, CashAdjusterCommon):
         return response
 
 
-class DeskDataPublisher(Resource, CashAdjusterCommon):
+class DeskDataPublisher(Resource, CashAdjusterDbCommon):
     def __init__(self):
         super().__init__()
 
