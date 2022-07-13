@@ -119,7 +119,7 @@ class BuyManager(Resource, CashAdjusterCommon):
                 'ExclusionType': 'CASH_OVERLIMIT',
                 'MarketPrice': float(req['MarketPrice'])
             })
-            response.status_code = 400
+            response.status_code = 401
             return response
         response = jsonify({'msg': 'success'})
         response.status_code = 200

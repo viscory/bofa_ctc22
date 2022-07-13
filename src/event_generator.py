@@ -125,7 +125,7 @@ class EventGenerator(Resource, EventGeneratorCommon):
                         url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('TRADE_DATA_PRODUCER_PORT')}/publish_trade_event",
                         json=event
                     ).json()
-                    if 'ExclusionType' in resJson():
+                    if 'ExclusionType' in resJson:
                         conn = self.get_db()
                         exclusionType = resJson['ExclusionType']
                         marketPrice = resJson['MarketPrice']

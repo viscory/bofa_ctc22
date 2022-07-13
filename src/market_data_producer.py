@@ -43,18 +43,18 @@ class MarketDataCommon:
 
     def init_bond_table(self, cursor):
         cursor.execute('''
-        CREATE TABLE IF NOT EXISTS BondPrices (
-            BondID TEXT PRIMARY KEY,
-            Currency TEXT,
-            Price REAL
-        )
+            CREATE TABLE IF NOT EXISTS BondPrices (
+                BondID TEXT PRIMARY KEY,
+                Currency TEXT,
+                Price REAL
+            )
         ''')
         with open(self.INITIAL_BOND_DATA, 'r') as handle:
             reader = csv.reader(handle)
             next(reader)
             for (bondID, currency) in reader:
                 cursor.execute(f'''
-                    INSERT OR REPLACE INTO BondPrices
+                    INSERT INTO BondPrices
                     VALUES ("{bondID.replace(' ', '')}", "{currency.replace(' ', '')}", -1)
                 ''')
 
@@ -70,7 +70,7 @@ class MarketDataCommon:
             next(reader)
             for (currency, rate) in reader:
                 cursor.execute(f'''
-                    INSERT OR REPLACE INTO FxRates
+                    INSERT INTO FxRates
                     VALUES ("{currency.replace(' ', '')}", {rate})
                 ''')
 
@@ -211,8 +211,9 @@ class TradeDataEnricher(Resource, MarketDataCommon):
         result, err = self.enrich_request(cursor, bondID)
         self.close_connection()
         response = jsonify(result)
+        response.status_code = 200
         if err:
-            response.status_code = 400
+            response.status_code = 402
         return response
 
 

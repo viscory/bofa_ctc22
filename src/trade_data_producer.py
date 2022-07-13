@@ -20,23 +20,25 @@ class TradeDataSubscriber(Resource):
             response.status_code = 400
             return response
 
-        req['FxRate'], req['MarketPrice'] = tradeData['FxRate'], tradeData['MarketPrice'] 
+        req['FxRate'], req['MarketPrice'] = tradeData['FxRate'], tradeData['MarketPrice']
         signalType = req['BuySell']
         if signalType == 'sell':
-            res = requests.post(
+            resJson = requests.post(
                 url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('PORTFOLIO_ENGINE_PORT')}/sell",
                 json=req
-            )
-        if signalType == 'buy':
-            res = requests.post(
+            ).json()
+        elif signalType == 'buy':
+            resJson = requests.post(
                 url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('CASH_ADJUSTER_PORT')}/buy",
                 json=req
-            )
-        res = res.json()
-        if 'ExclusionType' in res:
-            response = jsonify(res)
+            ).json()
+        else:
+            response = jsonify({'msg': 'invalid signal'})
             response.status_code = 400
-            return response
+
+        if 'ExclusionType' in resJson:
+            response = resJson
+            response.status_code = 401
         else:
             response = jsonify({'msg': 'success'})
             response.status_code = 200
