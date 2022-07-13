@@ -66,10 +66,10 @@ class EventGenerator(Resource, EventGeneratorCommon):
     def __init__(self):
         super().__init__()
         self.dataDir = 'data/events.json'
+        self.DATABASE = 'data/exclusions.db'
 
     def insert_exclusion(
         self,
-        conn,
         eventID,
         desk,
         trader,
@@ -80,14 +80,16 @@ class EventGenerator(Resource, EventGeneratorCommon):
         marketPrice,
         exclusionType
     ):
+        self.init_db()
+        db = sqlite3.connect(self.DATABASE)
+        cursor = db.cursor()
         # assuming no primary key assumptions
         # as evens.json is assumed to be valid
-        cursor = conn.cursor()
         price = str(float(marketPrice))
         if exclusionType == 'NO_MARKET_PRICE':
             price = ''
         cursor.execute(f'''
-            INSERT INTO Exclusions
+            INSERT OR REPLACE INTO Exclusions
             VALUES (
                 "{eventID}",
                 "{desk}",
@@ -100,7 +102,8 @@ class EventGenerator(Resource, EventGeneratorCommon):
                 "{exclusionType}"
             )
         ''')
-        conn.commit()
+        db.commit()
+        db.close()
 
     def get(self):
         with open(self.dataDir, 'r') as dataFile:
@@ -126,11 +129,9 @@ class EventGenerator(Resource, EventGeneratorCommon):
                         json=event
                     ).json()
                     if 'ExclusionType' in resJson:
-                        conn = self.get_db()
                         exclusionType = resJson['ExclusionType']
                         marketPrice = resJson['MarketPrice']
                         self.insert_exclusion(
-                            conn,
                             eventID,
                             desk,
                             trader,
@@ -141,7 +142,6 @@ class EventGenerator(Resource, EventGeneratorCommon):
                             marketPrice,
                             exclusionType
                         )
-                        self.close_connection()
                 else:
                     app.logger.error(f"EventID: {event.get('EventID')}, invalid event type")
                 time.sleep(EVENT_DELAY)

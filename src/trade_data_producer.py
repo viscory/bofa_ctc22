@@ -37,7 +37,7 @@ class TradeDataSubscriber(Resource):
             response.status_code = 400
 
         if 'ExclusionType' in resJson:
-            response = resJson
+            response = jsonify(resJson)
             response.status_code = 401
         else:
             response = jsonify({'msg': 'success'})

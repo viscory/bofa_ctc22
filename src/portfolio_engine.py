@@ -161,9 +161,10 @@ class PortfolioDataPublisher(Resource, PortfolioEngineCommon):
         res = []
         bondPrices, fxRates = self.get_market_prices()
         for (desk, trader, book, bondID, positions) in self.get_all_data(cursor):
+            bondCurrency, bondPrice = bondPrices.get(bondID)
             res.append([desk, trader, book, bondID, positions])
             res[-1].append(self.calculate_net_value(
-                positions, bondPrices[bondID], fxRates[bondID]
+                positions, bondPrice, fxRates[bondCurrency]
             ))
         return res
 

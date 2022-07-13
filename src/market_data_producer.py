@@ -21,6 +21,7 @@ class MarketDataCommon:
     def close_connection(self):
         db = getattr(g, "_database", None)
         if db is not None:
+            g._database = None
             db.commit()
             db.close()
 
