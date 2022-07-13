@@ -6,12 +6,12 @@ import requests
 from flask import Flask, g, jsonify
 from flask_restful import Api, Resource
 
+EVENT_DELAY = int(os.getenv('EVENT_PRODUCTION_DELAY'))/1000
+EVENTS_DIR = f"{os.getcwd()}/{os.getenv('EVENTS_DIR')}"
+
 MARKET_DATA_EVENTS = ["FXEvent", "PriceEvent"]
 TRADE_EVENTS = ["TradeEvent"]
 ALLOWED_EVENTS = TRADE_EVENTS + MARKET_DATA_EVENTS
-EVENT_DELAY = int(os.getenv("EVENT_PRODUCTION_DELAY"))/1000
-EVENT_DELAY = 0.2
-
 
 class EventGeneratorCommon:
     def __init__(self):
@@ -20,6 +20,7 @@ class EventGeneratorCommon:
     def close_connection(self):
         db = getattr(g, "_database", None)
         if db is not None:
+            g._database = None
             db.commit()
             db.close()
 
@@ -65,11 +66,11 @@ class EventGeneratorCommon:
 class EventGenerator(Resource, EventGeneratorCommon):
     def __init__(self):
         super().__init__()
-        self.dataDir = 'data/events.json'
         self.DATABASE = 'data/exclusions.db'
 
     def insert_exclusion(
         self,
+        cursor,
         eventID,
         desk,
         trader,
@@ -80,11 +81,6 @@ class EventGenerator(Resource, EventGeneratorCommon):
         marketPrice,
         exclusionType
     ):
-        self.init_db()
-        db = sqlite3.connect(self.DATABASE)
-        cursor = db.cursor()
-        # assuming no primary key assumptions
-        # as evens.json is assumed to be valid
         price = str(float(marketPrice))
         if exclusionType == 'NO_MARKET_PRICE':
             price = ''
@@ -102,11 +98,9 @@ class EventGenerator(Resource, EventGeneratorCommon):
                 "{exclusionType}"
             )
         ''')
-        db.commit()
-        db.close()
 
     def get(self):
-        with open(self.dataDir, 'r') as dataFile:
+        with open(EVENTS_DIR, 'r') as dataFile:
             events = json.loads(dataFile.read())
             for event in events:
                 eventType, eventID = event['EventType'], event['EventID']
@@ -129,9 +123,11 @@ class EventGenerator(Resource, EventGeneratorCommon):
                         json=event
                     ).json()
                     if 'ExclusionType' in resJson:
+                        cursor = self.get_db().cursor()
                         exclusionType = resJson['ExclusionType']
                         marketPrice = resJson['MarketPrice']
                         self.insert_exclusion(
+                            cursor,
                             eventID,
                             desk,
                             trader,
@@ -142,6 +138,7 @@ class EventGenerator(Resource, EventGeneratorCommon):
                             marketPrice,
                             exclusionType
                         )
+                        self.close_connection()
                 else:
                     app.logger.error(f"EventID: {event.get('EventID')}, invalid event type")
                 time.sleep(EVENT_DELAY)
@@ -161,10 +158,9 @@ class ExclusionPublisher(Resource, EventGeneratorCommon):
         ''').fetchall()
 
     def get(self):
-        conn = self.get_db()
-        cursor = conn.cursor()
+        cursor = self.get_db().cursor()
         data = self.get_exclusions(cursor)
-        conn.close()
+        self.close_connection()
         response = jsonify(data)
         response.status_code = 200
         return response
