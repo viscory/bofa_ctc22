@@ -10,6 +10,8 @@ then
 	echo $! >> "pidfile"
 	python3 "`pwd`/backend/portfolio_engine.py" &
 	echo $! >> "pidfile"
+#	python3 "`pwd`/backend/report_generator.py" &
+#	echo $! >> "pidfile"
 else
 	while true; do
 		read -p "Running FICC-backend detected. Restart? (y/n) " yn

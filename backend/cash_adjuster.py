@@ -124,10 +124,10 @@ class DeskDataPublisher(Resource, CashAdjusterDbCommon):
         super().__init__()
 
     def get_all_desk_cash(self, cursor):
-        return {k: v for (k, v) in cursor.execute('''
+        return cursor.execute('''
             SELECT Desk, Cash
             FROM DeskLiquidity
-        ''').fetchall()}
+        ''').fetchall()
 
     def get(self):
         cursor = self.get_db().cursor()
