@@ -4,10 +4,13 @@ import requests
 from flask import Flask, request, jsonify, g
 from flask_restful import Api, Resource
 
-from common import DbCommon
+from common import Common
 
 
-class CashAdjusterDbCommon(DbCommon):
+# cash_adjuster and portfolio_engine are highly similar classes
+# common functions related to properly initializing the database
+# as well as utility functions to query for and adjust the cash in each desk
+class CashAdjusterCommon(Common):
     def __init__(self):
         super().__init__('backend/data/cash_adjuster.db', g)
 
@@ -47,7 +50,11 @@ class CashAdjusterDbCommon(DbCommon):
         ''')
 
 
-class BuyManager(Resource, CashAdjusterDbCommon):
+# this class is responsible for:
+# querying the db if enough cash is available in the desk for purchase
+# alerting event generator if this isnt possible
+# if possible, alert portfolio engine that new positions are available
+class BuyManager(Resource, CashAdjusterCommon):
     def __init__(self):
         super().__init__()
 
@@ -96,7 +103,10 @@ class BuyManager(Resource, CashAdjusterDbCommon):
         return response
 
 
-class SellAdjuster(Resource, CashAdjusterDbCommon):
+# this class is a helper function
+# it is called by portflio engine if a sale has been made,
+# so new liquidity is released into the desk
+class SellAdjuster(Resource, CashAdjusterCommon):
     def __init__(self):
         super().__init__()
 
@@ -119,7 +129,10 @@ class SellAdjuster(Resource, CashAdjusterDbCommon):
         return response
 
 
-class DeskDataPublisher(Resource, CashAdjusterDbCommon):
+# this class is responsivle for keeping track of the cash in each desk
+# it also publishes this data to report generator to create reports
+# or to the dashboard for display
+class DeskDataPublisher(Resource, CashAdjusterCommon):
     def __init__(self):
         super().__init__()
 

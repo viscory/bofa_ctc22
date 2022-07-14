@@ -1,19 +1,26 @@
 import os
-import sqlite3
 import requests
 from flask import Flask, request, jsonify, g
 from flask_restful import Api, Resource
 
-from common import DbCommon
+from common import Common
 
 
-class PortfolioEngineDbCommon(DbCommon):
+# portfolio_engine and cash_adjuster are highly similar classes
+# common functions related to properly initializing the database
+# as well as utility functions to query for and adjust the cash in each desk
+class PortfolioEngineCommon(Common):
     def __init__(self):
         super().__init__('backend/data/portfolio_data.db', g)
 
     def init_data(self, cursor):
         self.init_portfolio_table(cursor)
 
+    # only book, bondID are primary keys
+    # because each book name must be unique
+    # (as multiple traders cannot have the same book)
+    # there is no need to set the other as primary keys
+    # since book, bondID MUST be unique
     def init_portfolio_table(self, cursor):
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS PortfolioData (
@@ -51,7 +58,11 @@ class PortfolioEngineDbCommon(DbCommon):
         ''')
 
 
-class SellManager(Resource, PortfolioEngineDbCommon):
+# this class is responsible for:
+# querying the db if enough position is available in the desk for sale
+# alerting event generator if this isnt possible
+# if possible, alert cash adjuster that more liquidity is available
+class SellManager(Resource, PortfolioEngineCommon):
     def __init__(self):
         super().__init__()
 
@@ -93,7 +104,10 @@ class SellManager(Resource, PortfolioEngineDbCommon):
         return response
 
 
-class BuyAdjuster(Resource, PortfolioEngineDbCommon):
+# this class is a helper function
+# it is called by cash adjuster if a purchase has been made,
+# so new positions are available for the book
+class BuyAdjuster(Resource, PortfolioEngineCommon):
     def __init__(self):
         super().__init__()
 
@@ -115,7 +129,8 @@ class BuyAdjuster(Resource, PortfolioEngineDbCommon):
         return response
 
 
-class PortfolioDataPublisher(Resource, PortfolioEngineDbCommon):
+# this class publishes this data to report generator to create reports
+class PortfolioDataPublisher(Resource, PortfolioEngineCommon):
     def __init__(self):
         super().__init__()
 
@@ -125,33 +140,9 @@ class PortfolioDataPublisher(Resource, PortfolioEngineDbCommon):
             FROM PortfolioData
         ''').fetchall()
 
-    def get_market_prices(self):
-        responseJson = requests.get(f"http://{os.getenv('FLASK_HOST')}:{os.getenv('MARKET_DATA_PRODUCER_PORT')}/get_market_data").json()
-        return responseJson['Bond'], responseJson['FX']
-
-    def get_info(self, cursor):
-        res = []
-        bondPrices, fxRates = self.get_market_prices()
-        for (desk, trader, book, bondID, positions) in self.get_all_data(cursor):
-            bondCurrency, bondPrice = bondPrices.get(bondID)
-            fxRate = fxRates.get(bondCurrency)
-            res.append([
-                desk,
-                trader,
-                book,
-                bondID,
-                positions,
-                bondCurrency,
-                bondPrice,
-                self.calculate_net_value(
-                    positions, bondPrice, fxRate
-                )
-            ])
-        return res
-
     def get(self):
         cursor = self.get_db().cursor()
-        result = self.get_info(cursor)
+        result = self.get_all_data(cursor)
         self.close_connection()
         response = jsonify(result)
         response.status_code = 200

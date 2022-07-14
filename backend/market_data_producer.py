@@ -3,10 +3,11 @@ import csv
 from flask import Flask, request, jsonify, g
 from flask_restful import Resource, Api
 
-from common import DbCommon
+from common import Common
 
 
-class MarketDataDbCommon(DbCommon):
+# common utility functions related to initialize the database
+class MarketDataCommon(Common):
     def __init__(self):
         super().__init__('backend/data/market_prices.db', g)
 
@@ -48,10 +49,14 @@ class MarketDataDbCommon(DbCommon):
                 ''')
 
 
-class MarketDataSubscriber(Resource, MarketDataDbCommon):
+# receives price events from event generator
+# this is used to update the relevant bond prices or fx rate
+class MarketDataSubscriber(Resource, MarketDataCommon):
     def __init__(self):
         super().__init__()
 
+    # tech spec specified there cannot be more bonds
+    # therefore, insert or replace into is not required
     def update_bond(self, cursor, bondID, price):
         # trading restricted to 30 given bonds/ bond_details.csv
         cursor.execute(f'''
@@ -60,6 +65,7 @@ class MarketDataSubscriber(Resource, MarketDataDbCommon):
             WHERE BondID = "{bondID}"
         ''')
 
+    # insert or replace into is required as new currencies can be introducer
     def update_fx(self, cursor, currency, rate):
         # insert or replace as new currencies can be trades
         cursor.execute(f'''
@@ -83,7 +89,9 @@ class MarketDataSubscriber(Resource, MarketDataDbCommon):
         return response
 
 
-class MarketDataPublisher(Resource, MarketDataDbCommon):
+# this class publishes data to portfolio_engine to calculate net values
+# this is also published to the dashboard and report generator
+class MarketDataPublisher(Resource, MarketDataCommon):
     def __init__(self):
         super().__init__()
 
@@ -100,31 +108,32 @@ class MarketDataPublisher(Resource, MarketDataDbCommon):
             WHERE price != -1
         ''').fetchall()
 
-    def get_market_prices(self, cursor):
-        result = dict()
-        fxRates = self.get_fx_rates(cursor)
-        bondPrices = self.get_bond_prices(cursor)
+    def get_market_prices(self, cursor, instrument):
+        if instrument == 'fx':
+            return self.get_fx_rates(cursor)
+        elif instrument == 'bonds':
+            return self.get_bond_prices(cursor)
 
-        result['FX'] = dict(fxRates)
-        result['Bond'] = dict(
-            ((bondID, (currency, price))
-                for bondID, currency, price in bondPrices)
-        )
-        return result
-
-    def get(self):
+    def get(self, instrument):
         cursor = self.get_db().cursor()
-        result = self.get_market_prices(cursor)
+        result = self.get_market_prices(cursor, instrument)
         self.close_connection()
         response = jsonify(result)
         response.status_code = 200
         return response
 
 
-class TradeDataEnricher(Resource, MarketDataDbCommon):
+# for any trade event, the underlyign currency rate and the bond's market price
+# is also sent so that the amount of money required to buy
+# or the extent to which the desk liquidity is to be increased when sold
+# can be evaluated
+class TradeDataEnricher(Resource, MarketDataCommon):
     def __init__(self):
         super().__init__()
 
+    # using this style of function return patterns
+    # as errors have to be returned in a safe, consistent way
+    # inspired by golang
     def get_bond_details(self, cursor, bondID):
         # possible to not have a bond price event
         # not possible for bondID to be new
@@ -135,8 +144,8 @@ class TradeDataEnricher(Resource, MarketDataDbCommon):
         ''').fetchall()
         if result[0][1] == -1:
             app.logger.error(f"Error: No Price History for {bondID}")
-            return 'NO_MARKET_PRICE', 1
-        return result[0], 0
+            return 'NO_MARKET_PRICE', True
+        return result[0], False
 
     def get_fx_rate(self, cursor, currency):
         # possible to not have an FX price event
@@ -147,8 +156,8 @@ class TradeDataEnricher(Resource, MarketDataDbCommon):
         ''').fetchall()
         if len(result) == 0:
             app.logger.error(f"No Price History for {currency}")
-            return 'NO_MARKET_PRICE', 1
-        return float(result[0][0]), 0
+            return 'NO_MARKET_PRICE', True
+        return float(result[0][0]), False
 
     def enrich_request(self, cursor, bondID):
         result = {'MarketPrice': -1}
@@ -161,15 +170,15 @@ class TradeDataEnricher(Resource, MarketDataDbCommon):
             return result, 1
         currency, marketPrice = res
         res, err = self.get_fx_rate(cursor, currency)
-        # if no fx price, NO_MARKET_PRICE
+        # if no underlying fx price, NO_MARKET_PRICE
         if err:
             result['ExclusionType'] = res
-            return result, 1
+            return result, True
         fxRate = res
 
         result['MarketPrice'] = marketPrice
         result['FxRate'] = fxRate
-        return result, 0
+        return result, False
 
     def get(self):
         req = request.json
@@ -188,7 +197,7 @@ if __name__ == '__main__':
     app = Flask(__name__)
     api = Api(app)
 
-    api.add_resource(MarketDataPublisher, '/get_market_data')
+    api.add_resource(MarketDataPublisher, '/get_data/<string:instrument>')
     api.add_resource(MarketDataSubscriber, '/publish_price_event')
     api.add_resource(TradeDataEnricher, '/enrich_trade')
 

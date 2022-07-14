@@ -2,7 +2,11 @@ import os
 import sqlite3
 
 
-class DbCommon:
+# common class that most other classes derive from
+# it contains some specific functions related to holding a sqlite connection
+# especially in flask in a thread-safe way using flask.g
+# https://flask.palletsprojects.com/en/2.1.x/appcontext/
+class Common:
     def __init__(self, database, g):
         self.DATABASE = database
         self.g = g
@@ -37,6 +41,7 @@ class DbCommon:
     def init_data(self, cursor):
         pass
 
+    # this method is here so that bond valuation formula is easily changable
     @staticmethod
     def calculate_net_value(quantity, marketPrice, fxRate):
         return quantity * (marketPrice / fxRate)

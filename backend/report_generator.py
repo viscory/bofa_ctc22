@@ -2,31 +2,28 @@ import shutil
 import os
 import requests
 import pandas as pd
-from flask import Flask, jsonify, g
+from flask import Flask, jsonify, request
 from flask_restful import Api, Resource
 
-from common import DbCommon
 
-
-class ReportGeneratorCommon(DbCommon):
-    def __init__(self):
-        super().__init__('backend/data/report_generator.db', g)
-
-    def init_data(self, cursor):
-        self.init_event_tracker(cursor)
-        self.init_latest_event(cursor)
-
-    def init_event_tracker(self, cursor):
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS EventsToTrack (
-                EventID INTEGER PRIMARY KEY
-            )
-        ''')
+class ReportGeneratorCommon:
+    # the following generate dataframes for the csv files required in the tech spec
+    # primarily, they are simple groupby-summations according to different criteria
+    # some custom logic is required to format the data to the right decimal points
+    def generate_bond_level_report(self, df):
+        targetHeaders = ['Desk', 'Trader', 'Book', 'BondID', 'Positions', 'NV']
+        final = df[targetHeaders]
+        final['NV'] = final['NV'].apply(
+            lambda x: '{:.2f}'.format(float(x))
+        )
+        final = final.sort_values(by=['Desk', 'Trader', 'Book', 'BondID'])
+        return final
 
     def generate_currency_level_report(self, df):
-        final = df[['Desk', 'Currency', 'Positions', 'NV']].groupby(
-            ['Desk', 'Currency']
-        ).sum().reset_index()[:]
+        targetHeaders = ['Desk', 'Currency', 'Positions', 'NV']
+        groupbyColumns = ['Desk', 'Currency']
+
+        final = df[targetHeaders].groupby(groupbyColumns).sum().reset_index()[:]
         final['Positions'] = final['Positions'].apply(
             lambda x: '{:.3f}'.format(float(x))
         )
@@ -36,18 +33,11 @@ class ReportGeneratorCommon(DbCommon):
         final = final.sort_values(by=['Desk', 'Currency'])
         return final
 
-    def generate_bond_level_report(self, df):
-        final = df[['Desk', 'Trader', 'Book', 'BondID', 'Positions', 'NV']]
-        final['NV'] = final['NV'].apply(
-            lambda x: '{:.2f}'.format(float(x))
-        )
-        final = final.sort_values(by=['Desk', 'Trader', 'Book', 'BondID'])
-        return final
-
     def generate_position_level_report(self, df):
-        final = df[['Desk', 'Trader', 'Book', 'BondID', 'Positions', 'NV']].groupby(
-            ['Desk', 'Trader', 'Book']
-        ).sum().reset_index()[:]
+        targetHeaders = ['Desk', 'Trader', 'Book', 'BondID', 'Positions', 'NV']
+        groupbyColumns = ['Desk', 'Trader', 'Book']
+
+        final = df[targetHeaders].groupby(groupbyColumns).sum().reset_index()[:]
         final['Positions'] = final['Positions'].apply(
             lambda x: '{:.3f}'.format(float(x))
         )
@@ -57,13 +47,19 @@ class ReportGeneratorCommon(DbCommon):
         final = final.sort_values(by=['Desk', 'Trader', 'Book'])
         return final
 
+    # data is first collected from the relevant components, then they undergo
+    # the necessary transformations
     def generate_cash_level_report(self):
         responseJson = requests.get(
             url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('CASH_ADJUSTER_PORT')}/get_desk_data"
         ).json()
+        headers = ['Desk', 'Cash']
+
         final = pd.DataFrame(responseJson)
-        final.columns = ['Desk', 'Cash']
-        final['Cash'] = final['Cash'].apply(lambda x: '{:.2f}'.format(float(x)))
+        final.columns = headers
+        final['Cash'] = final['Cash'].apply(
+            lambda x: '{:.2f}'.format(float(x))
+        )
         final = final.sort_values(by=['Desk'])
 
         return final
@@ -72,9 +68,7 @@ class ReportGeneratorCommon(DbCommon):
         responseJson = requests.get(
             url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('EVENT_GENERATOR_PORT')}/get_exclusions"
         ).json()
-
-        df = pd.DataFrame(responseJson)
-        df.columns = [
+        headers = [
             'EventID',
             'Desk',
             'Trader',
@@ -85,15 +79,14 @@ class ReportGeneratorCommon(DbCommon):
             'Price',
             'ExclusionType'
         ]
+
+        df = pd.DataFrame(responseJson)
+        df.columns = headers
         df['Price'] = df['Price'].apply(lambda x: '' if x == '' else '{:.2f}'.format(float(x)))
         return df
 
-    def get_book_data(self):
-        responseJson = requests.get(
-            url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('PORTFOLIO_ENGINE_PORT')}/get_book_data"
-        ).json()
-        df = pd.DataFrame(responseJson)
-        df.columns = [
+    def get_data(self):
+        headers = [
             'Desk',
             'Trader',
             'Book',
@@ -103,79 +96,81 @@ class ReportGeneratorCommon(DbCommon):
             'Price',
             'NV',
         ]
+
+        deskJson = requests.get(
+            url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('CASH_ADJUSTER_PORT')}/get_desk_data"
+        ).json()
+        bookJson = requests.get(
+            url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('PORTFOLIO_ENGINE_PORT')}/get_book_data"
+        ).json()
+        fxJson = requests.get(
+            url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('MARKET_DATA_PRODUCER_PORT')}/get_data/fx"
+        ).json()
+        bondJson = requests.get(
+            url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('MARKET_DATA_PRODUCER_PORT')}/get_data/bonds"
+        ).json()
+
+        fxDict = {k: v for (k,v) in fxJson}
+        bondCurrencyDict = {k: v for (k,v,z) in bondJson}
+        bondPriceDict = {k: fxDict[v]*z for (k,v,z) in bondJson}
+
+        df = pd.DataFrame(bookJson)
+        df[5] = df[3].map(bondCurrencyDict)
+        df[6] = df[3].map(bondPriceDict)
+        df[7] = df[4]*df[6]
+        df.columns = headers
         return df
 
 
+# this class exports the aforementioned dataframes into their relevant csv files
+# as per the filename format specified in the tech spec
 class ReportGenerator(Resource, ReportGeneratorCommon):
     def __init__(self):
         super().__init__()
 
-    def create_currency_level_report(self, eventID, df):
-        final = self.generate_currency_level_report(df)
-        final.to_csv(
-            f"backend/outputs/output_{eventID}/currency_level_portfolio_{eventID}.csv",
+    def export_to_csv(self, eventID, reportType, df):
+        df.to_csv(
+            f"backend/outputs/output_{eventID}/{reportType}_{eventID}.csv",
             index=False
         )
 
-    def create_bond_level_report(self, eventID, df):
-        final = self.generate_bond_level_report(df)
-        final.to_csv(
-            f"backend/outputs/output_{eventID}/bond_level_portfolio_{eventID}.csv",
-            index=False
-        )
+    # this abstraction removed around 30-40 lines of code, so it was worthwhile
+    # for the last three reports, the same data is used, so it is passes as an arg
+    def create_reports(self, eventID, reportType, data):
+        if reportType == 'exclusions':
+            df = self.generate_exclusion_report()
+        elif reportType == 'cash_level_portfolio':
+            df = self.generate_cash_level_report()
+        elif reportType == 'position_level_portfolio':
+            df = self.generate_position_level_report(data)
+        elif reportType == 'bond_level_portfolio':
+            df = self.generate_bond_level_report(data)
+        elif reportType == 'currency_level_portfolio':
+            df = self.generate_currency_level_report(data)
+        self.export_to_csv(eventID, reportType, df)
 
-    def create_position_level_report(self, eventID, df):
-        final = self.generate_currency_level_report(df)
-        final.to_csv(
-            f"backend/outputs/output_{eventID}/position_level_portfolio_{eventID}.csv",
-            index=False
-        )
-
-
-    def create_cash_level_report(self, eventID):
-        final = self.generate_cash_level_report()
-        final.to_csv(
-            f"backend/outputs/output_{eventID}/cash_level_portfolio_{eventID}.csv",
-            index=False
-        )
-
-    def create_exclusion_report(self, eventID):
-        final = self.generate_exclusion_report()
-        final.to_csv(
-            f"backend/outputs/output_{eventID}/exclusions_{eventID}.csv",
-            index=False
-        )
-
+    # if the directory exists, it is removed to purge old report data
+    # if outputs doesnt exist, it is made, primitive fault tolerance
     def create_output_folder(self, eventID):
-        if os.path.isdir(f"backend/outputs/output_{eventID}"):
+        if not os.path.isdir("backend/outputs"):
+            os.mkdir('backend/outputs')
+        elif os.path.isdir(f"backend/outputs/output_{eventID}"):
             shutil.rmtree(f"backend/outputs/output_{eventID}")
         os.mkdir(f'backend/outputs/output_{eventID}')
 
     def create_reports(self, eventID):
         targetID = eventID-1
         self.create_output_folder(targetID)
-        self.create_exclusion_report(targetID)
-        self.create_cash_level_report(targetID)
-
-        data = self.get_book_data()
-        self.create_currency_level_report(targetID, data)
-        self.create_bond_level_report(targetID, data)
-        self.create_position_level_report(targetID, data)
-
-    def being_tracked(self, cursor, eventID):
-        result = cursor.execute(f'''
-            SELECT * FROM EventsToTrack
-            WHERE
-                EventID = {eventID}
-        ''').fetchall()
-        is_tracked = len(result) > 0
-        if is_tracked:
-            cursor.execute(f'''
-                DELETE FROM EventsToTrack
-                WHERE EventID = {eventID}
-            ''')
-            return True
-        return False
+        data = self.get_data()
+        reportTypes = [
+            'exclusions',
+            'cash_level_portfolio',
+            'position_level_portfolio',
+            'bond_level_portfolio',
+            'currency_level_portfolio'
+        ]
+        for reportType in reportTypes:
+            self.create_report(eventID, reportType, data)
 
     def post(self, eventID):
         try:
@@ -184,48 +179,15 @@ class ReportGenerator(Resource, ReportGeneratorCommon):
             response = jsonify({'msg': 'bad eventID'})
             response.status_code = 400
             return response
-
-        cursor = self.get_db().cursor()
-        if self.being_tracked(cursor, eventID):
-            self.close_connection()
-            self.create_reports(eventID)
-        self.close_connection()
+        self.create_reports(eventID)
         response = jsonify({'msg': 'success'})
         response.status_code = 200
         return response
 
 
-class EventTracker(Resource, ReportGeneratorCommon):
-    def __init__(self):
-        super().__init__()
-
-    def track_event(self, cursor, eventID):
-        cursor.execute(f'''
-            INSERT OR REPLACE INTO EventsToTrack
-            VALUES ({eventID+1})
-        ''')
-
-    def get_events(self, cursor):
-        return cursor.execute('''
-            SELECT EventID from EventsToTrack
-        ''').fetchall()
-
-    def post(self, eventID):
-        try:
-            eventID = int(eventID)
-        except ValueError:
-            response = jsonify({'msg': 'bad eventID'})
-            response.status_code = 400
-            return response
-
-        cursor = self.get_db().cursor()
-        self.track_event(cursor, eventID)
-        response = jsonify({'tracking': self.get_events(cursor)})
-        response.status_code = 200
-        self.close_connection()
-        return response
-
-
+# this class is meant to serve requests from the portfolio dashboard
+# this is required as the previous class is meant to only export the data
+# more refactoring is possible here
 class DashboardReporter(Resource, ReportGeneratorCommon):
     def __init__(self):
         super().__init__()
@@ -234,7 +196,7 @@ class DashboardReporter(Resource, ReportGeneratorCommon):
         if reportType == 'cash':
             df = self.generate_cash_level_report()
         else:
-            data = self.get_book_data()
+            data = self.get_data()
             if reportType == 'currency':
                 df = self.generate_currency_level_report(data)
             elif reportType == 'bond':
@@ -250,12 +212,39 @@ class DashboardReporter(Resource, ReportGeneratorCommon):
         return response
 
 
+# this class is meant to satisfy additional component #1
+# categories and measures data is passes from the frontend to here
+# this is then processed to create the relevant csv file
+class CustomReporter(Resource, ReportGeneratorCommon):
+    def __init__(self):
+        super().__init__()
+
+    def custom_report(self, categories, measures):
+        BookDf = self.get_data()
+        DeskDf = self.generate_cash_level_report()
+        import pdb; pdb.set_trace()
+        headers = categories + measures
+
+    def post(self):
+        import pdb; pdb.set_trace()
+        req = request.json()
+        eventID = req['EventID']
+        param = req['Params'].split('+')
+        categories, measures = param[0], param[1]
+        categories, measures = (categories.split(','), measures.split(','))
+        if not isinstance(categories, list):
+            categories = [categories]
+        if not isinstance(measures, list):
+            measures = [measures]
+        df = self.custom_report(categories, measures)
+
+
 if __name__ == '__main__':
     app = Flask(__name__)
     api = Api(app)
 
     api.add_resource(ReportGenerator, '/generate_report/<string:eventID>')
-    api.add_resource(EventTracker, '/generate_for/<string:eventID>')
     api.add_resource(DashboardReporter, '/get_report/<string:reportType>')
+    api.add_resource(CustomReporter, '/generate_custom_report')
 
     app.run(host=os.getenv('FLASK_HOST'), port=os.getenv('REPORT_GENERATOR_PORT'), debug=True)
