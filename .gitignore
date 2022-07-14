@@ -1,4 +1,5 @@
 .zip
-.db
+backend/data/*db
+backend/outputs/*
 node_modules
 node_modules/
