@@ -1,7 +1,7 @@
 
 # FICC Coding Challenge - Code To Connect 2022
 
-The challenge was to create a portfolio tracker.
+The challenge was to create a portfolio tracker. Please check the powerpoint deck to get a better idea of what I created. Ranked 2nd for the challenge.
 
 
 
@@ -61,13 +61,17 @@ To run this project, you will need to add the following environment variables to
 
 ### Data Directories
 `EVENTS_DIR=backend/data/events.json`
+
 `INITIAL_DESK_DATA=backend/data/initial_cash.csv`
+
 `INITIAL_BOND_DATA=backend/data/bond_details.csv`
+
 `INITIAL_FX_DATA=backend/data/initial_fx.csv`
 
+## Delay between events
 `EVENT_PRODUCTION_DELAY=2500`
 
 ## Support
 
-For support, email faiyaz_r@otlook.com.
+For support, don't.
 
