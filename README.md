@@ -11,7 +11,7 @@ To deploy this project, you must setup the backend and frontend
 
 For the frontend.
 ```bash
-		cd frontend
+    cd frontend
     npm install --force
     npm start
 ```
@@ -21,7 +21,7 @@ For the backend, first, please view the .env file in the root directory and make
 Then, please set up the environment using pipenv.
 ```bash
     pipenv install
-		pipenv run
+    pipenv run
 ```
 
 There are start, stop, reset scripts in the root directory. Namely, start.sh, stop.sh, reset.sh
@@ -68,7 +68,7 @@ To run this project, you will need to add the following environment variables to
 
 `INITIAL_FX_DATA=backend/data/initial_fx.csv`
 
-## Delay between events
+### Delay between events
 `EVENT_PRODUCTION_DELAY=2500`
 
 ## Support
