@@ -84,21 +84,30 @@ class EventGenerator(Resource, EventGeneratorCommon):
         return cursor.execute(f'''
             SELECT * FROM EventsToTrack
             WHERE
-                EventID = {eventID-1}
+                EventID = {int(eventID)-1}
         ''').fetchall()
 
-    def generate_report(eventID, info):
-        if 'special' in info:
+    def generate_report(self, eventID, info):
+        if 'general' in info:
             requests.post(
-                url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('REPORT_GENERATOR_PORT')}/generate_report/{eventID-1}"
+                url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('REPORT_GENERATOR_PORT')}/generate_report/{int(eventID)-1}"
             )
         else:
-            request.post(
+            requests.post(
                 url=f"http://{os.getenv('FLASK_HOST')}:{os.getenv('REPORT_GENERATOR_PORT')}/generate_custom_report",
-                json=jsonify({'EventID': eventID, 'Params': info})
+                json={'EventID': int(eventID)-1, 'Params': info}
             )
 
     def update_tracked_event_status(self, eventID, cursor):
+        cursor.execute(f'''
+            UPDATE EventsToTrack
+            SET 
+                Status = "skipped"
+                AND Info = "EventID already processed. Request earlier."
+            WHERE
+                EventID < {eventID}
+                AND Status = "tracking"
+        ''')
         cursor.execute(f'''
             UPDATE EventsToTrack
             SET
@@ -113,7 +122,8 @@ class EventGenerator(Resource, EventGeneratorCommon):
             events = json.loads(dataFile.read())
             for event in events:
                 count += 1
-                eventType, eventID = event['EventType'], event['EventID']
+                eventType, eventID = event['EventType'], int(event['EventID'])
+                app.logger.info(f"processing event {eventID}")
 
                 cursor = self.get_db().cursor()
                 for eventID, status, info in self.tracked_events(eventID, cursor):
@@ -140,6 +150,7 @@ class EventGenerator(Resource, EventGeneratorCommon):
                         json=event
                     ).json()
                     if 'ExclusionType' in resJson:
+                        app.logger.info(f"event {eventID} was an exclusion")
                         cursor = self.get_db().cursor()
                         exclusionType = resJson['ExclusionType']
                         marketPrice = resJson['MarketPrice']
@@ -158,7 +169,7 @@ class EventGenerator(Resource, EventGeneratorCommon):
                         self.close_connection()
                 else:
                     app.logger.error(f"EventID: {event.get('EventID')}, invalid event type")
-                time.sleep(int(os.getenv('EVENT_PRODUCTION_DELAY'))/1000)
+                # time.sleep(int(os.getenv('EVENT_PRODUCTION_DELAY'))/1000)
         response = jsonify({'msg': 'success'})
         response.status_code = 200
         return response
@@ -175,6 +186,7 @@ class ExclusionPublisher(Resource, EventGeneratorCommon):
         ''').fetchall()
 
     def get(self):
+        app.logger.info("Received an exclusion table request")
         cursor = self.get_db().cursor()
         data = self.get_exclusions(cursor)
         self.close_connection()
@@ -194,16 +206,20 @@ class EventTracker(Resource, EventGeneratorCommon):
         ''')
 
     def post(self):
-        req = request.json()
+        req = request.json
         eventID = req['EventID']
         categories = req['Measures']
         measures = req['Categories']
+        aggregates = req['Aggregates']
 
-        if 'NV' in measures and len(measures) != 1:
-            response = jsonify({'msg': 'bad measures/categories'})
-            response.status_code = 400
-            return response
-        params = f"{','.join(categories)}+{','.join(measures)}"
+        if not isinstance(categories, list):
+            categories = [categories]
+        if not isinstance(measures, list):
+            measures = [measures]
+        if not isinstance(aggregates, list):
+            aggregates = [aggregates]
+
+        params = f"{','.join(categories)}+{','.join(measures)}+{','.join(aggregates)}"
 
         try:
             eventID = int(eventID)
@@ -211,6 +227,7 @@ class EventTracker(Resource, EventGeneratorCommon):
             response = jsonify({'msg': 'bad eventID'})
             response.status_code = 400
             return response
+        app.logger.info(f"Tracking new event {eventID} for custom report generation")
 
         cursor = self.get_db().cursor()
         self.track_event(cursor, eventID, params)
@@ -226,10 +243,11 @@ class EventTrackerStatus(Resource, EventGeneratorCommon):
 
     def get_tracked_events(self, cursor):
         return cursor.execute('''
-            SELECT * FROM EventToTrack
+            SELECT * FROM EventsToTrack
         ''').fetchall()
 
     def get(self):
+        app.logger.info("Receiving status table request")
         cursor = self.get_db().cursor()
         result = self.get_tracked_events(cursor)
         self.close_connection()

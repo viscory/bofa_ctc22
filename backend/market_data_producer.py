@@ -80,9 +80,11 @@ class MarketDataSubscriber(Resource, MarketDataCommon):
         if eventType == 'PriceEvent':
             bondID, price = req['BondID'], float(req['MarketPrice'])
             self.update_bond(cursor, bondID, price)
+            app.logger.info("updating bond prices db with latest price")
         if eventType == 'FXEvent':
             currency, rate = req['ccy'], float(req['rate'])
             self.update_fx(cursor, currency, rate)
+            app.logger.info("updating fx prices db with latest price")
         self.close_connection()
         response = jsonify({'msg': 'success'})
         response.status_code = 200
@@ -118,6 +120,7 @@ class MarketDataPublisher(Resource, MarketDataCommon):
         cursor = self.get_db().cursor()
         result = self.get_market_prices(cursor, instrument)
         self.close_connection()
+        app.logger.info(f"publishing latest data for: {instrument}")
         response = jsonify(result)
         response.status_code = 200
         return response
@@ -184,6 +187,7 @@ class TradeDataEnricher(Resource, MarketDataCommon):
         req = request.json
         cursor = self.get_db().cursor()
         bondID = req['BondID']
+        app.logger.info("enriching trade data with latest market prices")
         result, err = self.enrich_request(cursor, bondID)
         self.close_connection()
         response = jsonify(result)

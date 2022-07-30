@@ -80,6 +80,7 @@ class SellManager(Resource, PortfolioEngineCommon):
             int(req['Quantity'])
         )
         if self.sufficient_positions(cursor, book, bondID, qty):
+            app.logger.info("sufficient positions, accepting order")
             payload = {
                 'Desk':  req['Desk'],
                 'Quantity':  int(req['Quantity']),
@@ -93,6 +94,7 @@ class SellManager(Resource, PortfolioEngineCommon):
             self.adjust_positions(cursor, desk, trader, book, bondID, -1*qty)
             self.close_connection()
         else:
+            app.logger.info("insufficient positions, rejecting order")
             response = jsonify({
                 'ExclusionType': 'QUANTITY_OVERLIMIT',
                 'MarketPrice': float(req['MarketPrice'])
@@ -122,6 +124,7 @@ class BuyAdjuster(Resource, PortfolioEngineCommon):
             req['BondID'],
             int(req['Quantity'])
         )
+        app.logger.info("adjusting position values to adjust for purchase")
         self.adjust_positions(cursor, desk, trader, book, bondID, qty)
         self.close_connection()
         response = jsonify({'msg': 'success'})
@@ -141,6 +144,7 @@ class PortfolioDataPublisher(Resource, PortfolioEngineCommon):
         ''').fetchall()
 
     def get(self):
+        app.logger.info("publishing portfolio data")
         cursor = self.get_db().cursor()
         result = self.get_all_data(cursor)
         self.close_connection()

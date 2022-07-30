@@ -77,6 +77,7 @@ class BuyManager(Resource, CashAdjusterCommon):
         txnValue = self.calculate_net_value(qty, marketPrice, fxRate)
 
         if self.sufficient_liquidity(cursor, desk, txnValue):
+            app.logger.info("sufficient liquidity, accepting order")
             payload = {
                 'Desk': desk,
                 'Trader': trader,
@@ -90,7 +91,7 @@ class BuyManager(Resource, CashAdjusterCommon):
             )
             self.adjust_cash(cursor, desk, -1*txnValue)
         else:
-            self.close_connection()
+            app.logger.info("insufficient liquidity, rejecting order")
             response = jsonify({
                 'ExclusionType': 'CASH_OVERLIMIT',
                 'MarketPrice': float(req['MarketPrice'])
@@ -122,6 +123,8 @@ class SellAdjuster(Resource, CashAdjusterCommon):
         )
         txnValue = self.calculate_net_value(qty, marketPrice, fxRate)
 
+        app.logger.info("adjusting cash values for to adjust for new sale")
+
         self.adjust_cash(cursor, desk, txnValue)
         self.close_connection()
         response = jsonify({'msg': 'success'})
@@ -143,6 +146,7 @@ class DeskDataPublisher(Resource, CashAdjusterCommon):
         ''').fetchall()
 
     def get(self):
+        app.logger.info("publishing book data")
         cursor = self.get_db().cursor()
         result = self.get_all_desk_cash(cursor)
         self.close_connection()
